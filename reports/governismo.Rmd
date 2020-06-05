@@ -1,0 +1,174 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+To do: média móvel; vis e planilha que detalha votações sem orientação de ninguém.
+
+Visualizar votações em outros órgãos antes da pandemia. 
+
+Temos muitos destaques? 
+
+```{r}
+library(tidyverse)
+library(here)
+library(lubridate)
+
+library(hrbrthemes)
+theme_set(theme_ipsum_rc())
+```
+
+```{r}
+votacoes2020 = read_csv2(here::here("data/raw/votacoes-2020.csv"))
+votacoes2019 = read_csv2(here::here("data/raw/votacoes-2019.csv"))
+
+votacoes2020 = votacoes2020 %>% 
+  bind_rows(votacoes2019) %>% 
+  filter(votosSim + votosNao > 10) # assim pegamos apenas as nominais
+```
+
+```{r}
+votos2020 = read_csv2(here::here("data/raw/votacoesVotos-2020.csv")) %>% 
+  bind_rows(read_csv2(here::here("data/raw/votacoesVotos-2019.csv"))) %>% 
+  select(-deputado_urlFoto, -deputado_idLegislatura)
+
+orientacoes2020 = read_csv2(here::here("data/raw/votacoesOrientacoes-2020.csv")) %>% 
+  bind_rows(read_csv2(here::here("data/raw/votacoesOrientacoes-2019.csv")))
+
+orientacao_gov = orientacoes2020 %>% 
+  filter(siglaBancada %in% c("GOV.", "Governo")) %>% 
+  mutate(prioridade = 2)
+
+votos_lider = votos2020 %>% 
+  filter(deputado_id == 179587) %>% 
+  select(idVotacao, uriVotacao, orientacao = voto) %>% 
+  mutate(prioridade = 1, siglaBancada = "GOV-lider")
+
+orientacao_gov = orientacao_gov %>% 
+  bind_rows(votos_lider) %>% 
+  group_by(idVotacao) %>% 
+  top_n(1, prioridade) %>% 
+  select(-siglaOrgao, -uriBancada, -descricao)
+```
+
+## Votações e orientação
+
+```{r}
+votacoes_orientadas = votacoes2020 %>% 
+  left_join(orientacoes2020, by = c("id" = "idVotacao")) %>% 
+  group_by(id, uri, data, siglaOrgao.x, ultimaApresentacaoProposicao_descricao) %>% 
+  summarise(tem_orientacao = any(!is.na(siglaBancada)))
+
+votacoes_orientadas %>% 
+  mutate(semana = floor_date(data, "weeks")) %>% 
+  count(semana, tem_orientacao) %>% 
+  ggplot(aes(x = semana, y = n, fill = tem_orientacao)) + 
+  geom_col(position = position_stack())
+```
+
+Quem orienta: 
+
+```{r}
+orientacoes2020 %>% 
+  count(siglaBancada, sort = T)
+```
+
+
+
+## Votos e orientação
+
+```{r}
+votos_orientados = votos2020 %>%
+  inner_join(orientacao_gov, by = c("idVotacao", "uriVotacao"))
+```
+
+```{r}
+governismos = votos_orientados %>% 
+  mutate(siglaBancada = if_else(siglaBancada == "Governo", "GOV.", siglaBancada)) %>% 
+  mutate(data_round = floor_date(dataHoraVoto, unit = "days")) %>% 
+  group_by(data_round, idVotacao) %>% 
+  summarise(obedeceram = sum(voto == orientacao), 
+            votos = n(),
+            desobedeceram = sum(voto != orientacao), 
+            governismo = obedeceram / (obedeceram + desobedeceram), 
+            tipo_orientacao = first(siglaBancada)) %>% 
+  ungroup()
+
+library(RcppRoll)
+
+media_movel = governismos %>% 
+  arrange(data_round) %>% 
+  mutate(media = roll_mean(governismo, 10, na.rm = TRUE, align="right", fill = NA)) %>% 
+  group_by(data_round) %>% 
+  summarise(media = mean(media, na.rm = T))
+```
+
+Há votações recentes sem orientação explícita do governo. Por que?
+
+```{r}
+votos_orientados %>%
+  filter(siglaBancada == "GOV-lider") %>%
+  distinct(idVotacao) %>%
+  left_join(votacoes2020, by = c("idVotacao" = "id")) %>%
+  select(
+    descricao,
+    ultimaApresentacaoProposicao_descricao,
+    ultimaAberturaVotacao_descricao
+  )
+```
+
+## Quantidade de votações
+
+
+```{r}
+nominais = governismos %>% 
+  mutate(data_round = floor_date(data_round, unit = "months")) %>% 
+  count(data_round) 
+
+nominais %>% 
+  ggplot() + 
+  geom_rect(data = governismos, 
+            xmin = as.POSIXct(as.Date("2020-02-26")), 
+            xmax = as.POSIXct(max(governismos$data_round)), 
+            ymin = -Inf, ymax = Inf, 
+            fill = "#ededed") + 
+  geom_col(data = nominais, 
+             aes(x = data_round, y = n), 
+           fill = "salmon") + 
+  labs(
+    title = "Votações nominais", 
+    subtitle = "Votações nominais no plenário nos dados abertos",
+    color = "Orientação", 
+    x = "Mês", 
+    y = "Número de votações nominais"
+  ) + 
+  NULL
+```
+
+## Governismo 
+
+
+```{r}
+ggplot() + 
+  geom_rect(data = governismos, 
+            xmin = as.POSIXct(as.Date("2020-02-26")), 
+            xmax = as.POSIXct(max(governismos$data_round)), 
+            ymin = -Inf, ymax = Inf, 
+            fill = "#ededed") + 
+  geom_point(data = governismos, 
+             aes(x = data_round, y = governismo, color = tipo_orientacao),
+             alpha = .5z) + 
+  geom_line(data = media_movel, aes(x = data_round, y = media), color = "black") +
+  # geom_step(data = media_movel, aes(x = data_round, y = media), color = "black") +
+  scale_y_percent() +
+  labs(
+    title = "Aderência à orientação do governo", 
+    subtitle = "Votos que seguiram o governo em cada votação. Linha é a média das últimas 10 votações.",
+    color = "Orientação", 
+    x = "Data", 
+    y = "Aderência"
+  ) + 
+  NULL
+```
+
+
