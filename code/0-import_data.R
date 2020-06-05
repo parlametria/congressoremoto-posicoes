@@ -74,13 +74,12 @@ orientacoes = orientacoes %>%
 votacoes_orientadas = votacoes %>%
   left_join(orientacoes, by = c("id" = "idVotacao")) %>%
   group_by(id,
-           uri,
-           data,
-           siglaOrgao,
-           nominal,
-           ultimaApresentacaoProposicao_descricao) %>%
+           uri) %>%
   summarise(tem_orientacao = any(!is.na(siglaBancada)), 
             tem_orientacao_gov = any(siglaBancada == "Governo", na.rm = T))
+
+votacoes = votacoes %>% 
+  left_join(votacoes_orientadas)
 
 
 ### SALVAR 
@@ -93,6 +92,3 @@ votacoes %>%
 
 orientacoes %>% 
   readr::write_csv(here::here("data", "orientacoes.csv"))
-
-votacoes_orientadas %>% 
-  readr::write_csv(here::here("data", "votacoes_orientadas.csv"))
