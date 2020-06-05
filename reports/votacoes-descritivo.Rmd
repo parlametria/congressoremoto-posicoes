@@ -2,7 +2,7 @@
 title: "Votações"
 output:
     html_document: 
-        self_contained: no
+        # self_contained: no
         theme: sandstone
 ---
 
@@ -15,35 +15,48 @@ library(reactable)
 library(hrbrthemes)
 theme_set(theme_ipsum_rc())
 
+source(here::here("code/lib.R"))
+
 knitr::opts_chunk$set(tidy = FALSE, 
                       echo = FALSE,
                       warning = FALSE)
 set.seed(1014)
 options(digits = 2, scipen = 999)
+
+# Cores: https://colors.muz.li/palette/f9b4ab/fdebd3/264e70/679186/bbd4ce
 ```
 
 
 ```{r}
-votacoes_orientadas = read_csv(
-  here::here("data/votacoes_orientadas.csv.gz"),
-  col_types = cols(
-    .default = col_character(),
-    data = col_date(format = ""),
-    nominal = col_logical(),
-    tem_orientacao = col_logical(),
-    tem_orientacao_gov = col_logical()
+votacoes = read_votacoes()
+```
+
+```{r}
+principais_orgaos = votacoes %>% 
+  count(siglaOrgao) %>% 
+  top_n(10, n) %>% 
+  pull(siglaOrgao)
+
+votacoes = votacoes %>%
+  mutate(
+    siglaOrgao_simples = if_else(siglaOrgao %in% principais_orgaos, siglaOrgao, "Outros"),
+    durante_pandemia = data > pandemia$inicio
   )
-)
+
+votacoes = votacoes %>% 
+  mutate(destaque = grepl("DTQ", ultimaAberturaVotacao_descricao))
+```
+
+Os dados: 
+
+```{r include=FALSE}
+votacoes %>% glimpse()
 ```
 
 ```{r}
-votacoes_orientadas %>% glimpse()
-```
-
-```{r}
-data_i = votacoes_orientadas %>% summarise(i = min(data)) %>% pull(i)
-data_f = votacoes_orientadas %>% summarise(i = max(data)) %>% pull(i)
-n_v = votacoes_orientadas %>% summarise(i = n()) %>% pull(i)
+data_i = votacoes %>% summarise(i = min(data)) %>% pull(i)
+data_f = votacoes %>% summarise(i = max(data)) %>% pull(i)
+n_v = votacoes %>% summarise(i = n()) %>% pull(i)
 ```
 
 ```{r}
@@ -72,7 +85,7 @@ Abaixo usamos como critério haver placar na votação. Pode não haver dados so
 Temos `r n_v` votações entre `r data_i` e `r data_f`.
 
 ```{r}
-votacoes_orientadas %>% 
+votacoes %>% 
   mutate(data = floor_date(data, "months")) %>% 
   count(data, nominal) %>% 
   ggplot(aes(x = data, y = n, fill = nominal)) + 
@@ -85,7 +98,7 @@ votacoes_orientadas %>%
 ```
 
 ```{r}
-votacoes_orientadas %>%
+votacoes %>%
   filter(nominal) %>%
   mutate(data = floor_date(data, "months")) %>%
   count(data, nominal) %>%
@@ -97,22 +110,10 @@ votacoes_orientadas %>%
 
 ### Onde são as votações?
 
-```{r}
-principais_orgaos = votacoes_orientadas %>% 
-  count(siglaOrgao) %>% 
-  top_n(10, n) %>% 
-  pull(siglaOrgao)
-
-votacoes_orientadas = votacoes_orientadas %>%
-  mutate(
-    siglaOrgao_simples = if_else(siglaOrgao %in% principais_orgaos, siglaOrgao, "Outros"),
-    durante_pandemia = data > pandemia$inicio
-  )
-```
 
 
 ```{r}
-votacoes_orientadas %>%
+votacoes %>%
   count(siglaOrgao_simples) %>%
   ggplot(aes(x = reorder(siglaOrgao_simples, n), y = n)) +
   geom_col(position = position_stack()) +
@@ -124,7 +125,7 @@ votacoes_orientadas %>%
 ```
 
 ```{r}
-votacoes_orientadas %>%
+votacoes %>%
   count(siglaOrgao_simples, nominal) %>%
   ggplot(aes(x = reorder(siglaOrgao_simples, n), y = n, fill = nominal)) +
   geom_col(position = position_stack()) +
@@ -136,14 +137,14 @@ votacoes_orientadas %>%
 ```
 
 ```{r}
-votacoes_orientadas %>% 
+votacoes %>% 
   filter(nominal) %>% 
   count(siglaOrgao, sort = T) %>% 
   reactable(compact = TRUE)
 ```
 
 ```{r}
-votacoes_orientadas %>%
+votacoes %>%
   count(siglaOrgao_simples, durante_pandemia) %>%
   ggplot(aes(x = reorder(siglaOrgao_simples, n), y = n, fill = durante_pandemia)) +
   geom_col(position = position_stack()) +
@@ -158,8 +159,29 @@ votacoes_orientadas %>%
 Onde são essas votações depois do início da pandemia?
 
 ```{r}
-votacoes_orientadas %>%
+votacoes %>%
   filter(durante_pandemia) %>%
   count(siglaOrgao, sort = T) %>%
   reactable(compact = TRUE)
 ```
+
+
+### Destaques
+
+```{r}
+votacoes %>% 
+  mutate(data = floor_date(data, "months")) %>% 
+  count(data, destaque) %>% 
+  ggplot(aes(x = data, y = n, fill = destaque)) + 
+  geom_pandemia() + 
+  geom_col(position = position_fill()) + 
+  scale_y_percent() +
+  scale_fill_manual(values = c("#f9d6ab", "#679186")) +
+  labs(
+    title = "Quão comuns são votações de destaques?",
+    subtitle = "Destaque se é votação de DTQ",
+    y = "Proporção das votações",
+    x = "Mês"
+  )
+```
+
