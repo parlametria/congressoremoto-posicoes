@@ -10,6 +10,9 @@ sh ./fetch.sh
 
 ## Criar datasets de votações
 
+```
+Rscript code/0-import_data.R
+```
 
 ## Congresso Remoto
 
