@@ -1,0 +1,235 @@
+---
+title: "Governismo"
+output:
+    html_document: 
+        # self_contained: no
+        theme: sandstone
+---
+
+To do: vis e planilha que detalha votações sem orientação de ninguém.
+
+Tirar votações consensuais; quantificá-las 
+
+Lidar com orientação Liberado
+
+Se orientação = Não e o voto é obstrução, isso é concordância?
+
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+library(tidyverse)
+library(here)
+library(lubridate)
+
+library(reactable)
+library(hrbrthemes)
+theme_set(theme_ipsum_rc())
+
+source(here::here("code/lib.R"))
+
+knitr::opts_chunk$set(tidy = FALSE, 
+                      echo = FALSE,
+                      warning = FALSE)
+set.seed(1014)
+options(digits = 2, scipen = 999)
+
+# Cores: https://colors.muz.li/palette/f9b4ab/fdebd3/264e70/679186/bbd4ce
+```
+
+
+```{r}
+votacoes = read_votacoes()
+
+votos2020 = read_csv(
+  here::here("data/votos.csv.gz"),
+  col_types = cols(.default = col_character(), dataHoraVoto = col_datetime(format = ""))
+) 
+
+orientacoes2020 = read_csv(
+  here::here("data/orientacoes.csv"),
+  col_types = cols(.default = col_character(), prioridade_orientacao = col_integer())
+) 
+
+orientacao_gov = orientacoes2020 %>% 
+  filter(siglaBancada %in% c("Governo"), orientacao != "Liberado")
+```
+
+```{r}
+bancadas = votos_orientados %>% 
+  group_by(deputado_siglaPartido) %>% 
+  summarise(bancada = n_distinct(deputado_id))
+  
+por_partido = votos_orientados %>% 
+  group_by(deputado_siglaPartido) %>% 
+  summarise(
+    obedeceram = sum(voto == orientacao), 
+            votos = n(),
+            desobedeceram = sum(voto != orientacao), 
+            governismo = obedeceram / (obedeceram + desobedeceram), 
+            tipo_orientacao = first(siglaBancada)) %>% 
+  ungroup() %>% 
+  left_join(bancadas) %>% 
+  filter(bancada >= 5)  
+
+presencas = votos_orientados %>% 
+  ungroup() %>% 
+  mutate(n_votacoes = n_distinct(idVotacao)) %>% 
+  group_by(deputado_nome) %>% 
+  arrange(dataHoraVoto) %>% 
+  summarise(compareceu = n(), 
+            obedeceu = sum(voto == orientacao), 
+            governismo = obedeceu / (compareceu), 
+            presenca = compareceu / mean(n_votacoes), 
+            deputado_siglaPartido = last(deputado_siglaPartido))
+```
+
+```{r}
+ggplot(por_partido, aes(x = governismo)) +
+  geom_dotplot(binwidth = .025) + 
+  scale_y_continuous(NULL, breaks = NULL)
+```
+
+
+```{r}
+por_partido %>% 
+  top_n(5, bancada) %>% 
+# por_partido %>% 
+  ggplot(aes(y = "", x = governismo)) + 
+  geom_point(size = 6.5, alpha = .5, shape = 21, fill = "lightseagreen") + 
+  scale_y_discrete(NULL, breaks = NULL) + 
+  scale_x_percent(limits = c(0, 1.1)) + 
+  labs(
+    title = "Governismo entre os maiores partidos da Câmara", 
+    subtitle = "Votações de jan/2019 a maio/2020")
+  # ggbeeswarm::geom_quasirandom(size = 4, width = .1)
+```
+
+```{r}
+por_partido %>% 
+  ggplot(aes(y = "", x = governismo)) + 
+  geom_point(size = 6.5, alpha = .5, shape = 21, fill = "lightseagreen") + 
+  scale_y_discrete(NULL, breaks = NULL) + 
+  scale_x_percent(limits = c(0, 1.1)) + 
+  labs(
+    title = "Governismo para mais partidos na Câmara", 
+    subtitle = "Partidos com pelo menos 5 deputados. Votações de jan/2019 a maio/2020")
+  # ggbeeswarm::geom_quasirandom(size = 4, width = .1)
+```
+
+```{r}
+por_partido %>% 
+  ggplot(aes(x = governismo)) + 
+  # geom_point(size = 6.5, alpha = .5, shape = 21, fill = "lightseagreen") + 
+  geom_dotplot(binwidth = .025,shape = 21, fill = "lightseagreen") + 
+  scale_y_continuous(NULL, breaks = NULL) + 
+  scale_x_percent(limits = c(0, 1.1)) + 
+  labs(
+    title = "Governismo para mais partidos na Câmara", 
+    subtitle = "Partidos com pelo menos 5 deputados. Votações de jan/2019 a maio/2020")
+```
+
+```{r}
+presencas %>% 
+  ggplot(aes(x = presenca)) + 
+  geom_dotplot(binwidth = .015,shape = 21, fill = "#f9d6ab", stackdir = 'center') + 
+  scale_y_continuous(NULL, breaks = NULL) + 
+  scale_x_percent(limits = c(0, 1.1)) +
+  labs(
+    title = "Presença nas votações nominais", 
+    x = "Presença nas votações",
+    subtitle = "Deputado/as . Votações de jan/2019 a maio/2020")
+```
+
+```{r}
+presencas %>% 
+  filter(deputado_siglaPartido %in% c("PSB", "PT", "PSL")) %>% 
+  ggplot(aes(x = reorder(deputado_siglaPartido, presenca), y = presenca)) + 
+  geom_dotplot(binwidth = .015,shape = 21, fill = "#f9d6ab", stackdir = 'center', binaxis = "y") + 
+  # scale_y_continuous(NULL, breaks = NULL) + 
+  scale_y_percent(limits = c(0, 1.1)) +
+  coord_flip() + 
+  # facet_grid(deputado_siglaPartido ~ .) +
+  labs(
+    title = "Presença nas votações nominais", 
+    y = "Presença nas votações",
+    x = "",
+    subtitle = "Deputado/as . Votações de jan/2019 a maio/2020")
+```
+
+```{r}
+presencas %>% 
+  filter(deputado_siglaPartido %in% c("PSB", "PT", "PSL")) %>% 
+  group_by(deputado_siglaPartido) %>% 
+  summarise(presenca = mean(presenca)) %>% 
+  ggplot(aes(x = reorder(deputado_siglaPartido, presenca), y = presenca)) + 
+  geom_col(fill = "#f9d6ab", color = "black", width = .6) +
+  scale_y_percent(limits = c(0, 1.1)) +
+  coord_flip() + 
+  # facet_grid(deputado_siglaPartido ~ .) +
+  labs(
+    title = "Presença nas votações nominais", 
+    y = "Presença nas votações",
+    x = "",
+    subtitle = "Média por partido. Votações de jan/2019 a maio/2020")
+```
+
+
+
+```{r}
+presencas %>% 
+  ggplot(aes(x = presenca)) + 
+  # geom_histogram(binwidth = .1, fill = "#f9d6ab", color = "black", boundary = 0) + 
+  geom_density(fill = "#f9d6ab", color = "black") + 
+  scale_x_percent(limits = c(0, 1.1)) +
+  labs(
+    title = "Presença nas votações nominais", 
+    x = "Presença nas votações",
+    y = "Deputado/as",
+    subtitle = "Deputado/as . Votações de jan/2019 a maio/2020")
+```
+
+
+```{r}
+por_partido %>% 
+  ggplot(aes(x = governismo)) + 
+  # geom_point(size = 6.5, alpha = .5, shape = 21, fill = "lightseagreen") + 
+  geom_histogram(binwidth = .05, fill = "lightseagreen", colour = "black", boundary = 0) + 
+  # scale_y_continuous(NULL, breaks = NULL) + 
+  scale_x_percent(limits = c(0, 1.1)) + 
+  labs(
+    title = "Governismo para mais partidos na Câmara", 
+    subtitle = "Partidos com pelo menos 5 deputados. Votações de jan/2019 a maio/2020", 
+    y = "Número de partidos")
+```
+
+```{r}
+presencas %>% 
+  filter(compareceu >= 20) %>% 
+  ggplot(aes(x = presenca, y = governismo)) + 
+  geom_point(size = 2.5, alpha = .5, shape = 21, fill = "lightseagreen") +
+  scale_y_percent(limits = c(0, 1.1)) + 
+  labs(
+    title = "Governismo para mais partidos na Câmara", 
+    subtitle = "Partidos com pelo menos 5 deputados. Votações de jan/2019 a maio/2020", 
+    y = "Número de partidos")
+```
+
+
+```{r}
+por_partido_mes = votos_orientados %>% 
+  mutate(mes = floor_date(dataHoraVoto, unit = "months")) %>% 
+  group_by(deputado_siglaPartido, mes) %>% 
+  summarise(
+    obedeceram = sum(voto == orientacao), 
+            votos = n(),
+            desobedeceram = sum(voto != orientacao), 
+            governismo = obedeceram / (obedeceram + desobedeceram), 
+            tipo_orientacao = first(siglaBancada)) %>% 
+  ungroup() %>% 
+  left_join(bancadas) %>% 
+  filter(bancada >= 35)  
+
+por_partido_mes %>% 
+  ggplot(aes(x = mes, y = governismo, color = deputado_siglaPartido)) +
+  geom_line()
+```
+

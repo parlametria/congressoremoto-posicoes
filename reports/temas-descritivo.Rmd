@@ -26,15 +26,20 @@ options(digits = 2, scipen = 999)
 # Cores: https://colors.muz.li/palette/f9b4ab/fdebd3/264e70/679186/bbd4ce
 ```
 
-Por que há objetos null? fazer join no import?
-A maioria não tem temas???
+TO DO
 
+Aqui temos todas as votações? Qual a relação entre essas proposições e todas que avançaram na tramitação na câmara?
 
 
 ```{r}
-votacoes_raw = read_votacoes() %>% 
-  janitor::clean_names() %>% 
-  rename(descricao_votacao = descricao)
+votadas_raw = read_csv(
+  here::here("data/proposicoes-afetadas.csv"),
+  col_types = cols(
+    .default = col_character(),
+    data = col_date(format = ""),
+    proposicao_ano = col_double()
+  )
+) %>% janitor::clean_names()
 
 temas = read_csv(here::here("data/temas.csv"), 
                  col_types = cols(
@@ -42,25 +47,49 @@ temas = read_csv(here::here("data/temas.csv"),
   ano = col_double(),
   relevancia = col_double()
 )) %>% janitor::clean_names()
-
-objetos = read_csv(
-  here::here("data/objetos.csv"),
-  col_types = cols(
-    .default = col_character(),
-    data = col_date(format = ""),
-    proposicao_ano = col_double()
-  )
-) %>% janitor::clean_names() %>%
-  rename(descricao_proposicao = descricao, data_objeto = data)
-
-votacoes = votacoes_raw %>% 
-  left_join(objetos, by = c("id" = "id_votacao", "uri" = "uri_votacao"))
 ```
 
 ```{r}
-data_i = votacoes %>% summarise(i = min(data)) %>% pull(i)
-data_f = votacoes %>% summarise(i = max(data)) %>% pull(i)
-n_v = votacoes %>% summarise(i = n()) %>% pull(i)
+temas %>% 
+  skimr::skim()
+
+votadas_raw %>% skimr::skim()
+```
+
+
+```{r}
+names(votadas_raw)
+names(temas)
+```
+
+TO DO : Falar com Fabrício sobre diferenças em matches no join via URI e via nomes
+
+```{r}
+votadas_raw %>% 
+  # left_join(temas, by = c("proposicao_uri" = "uri_proposicao")) %>%
+  left_join(temas, by = c("proposicao_sigla_tipo" = "sigla_tipo",
+                          "proposicao_numero" = "numero",
+                          "proposicao_ano" = "ano")) %>%
+  # group_by(proposicao_ano) %>%
+  filter(proposicao_ano >= 2003) %>% 
+  summarise(cobertura = sum(!is.na(tema)) /n(), n = n())
+```
+
+```{r}
+votadas = 
+  votadas_raw %>% 
+  filter(!is.na(proposicao_ano)) %>% 
+  left_join(filter(temas, !is.na(ano)), 
+            by = c("proposicao_sigla_tipo" = "sigla_tipo",
+                          "proposicao_numero" = "numero",
+                          "proposicao_ano" = "ano")) %>%
+  filter(year(data) >= 2003) 
+```
+
+```{r}
+data_i = votadas %>% summarise(i = min(data)) %>% pull(i)
+data_f = votadas %>% summarise(i = max(data)) %>% pull(i)
+n_v = votadas %>% summarise(i = n_distinct(id_votacao)) %>% pull(i)
 ```
 
 ```{r}
@@ -80,72 +109,143 @@ geom_pandemia = function() {
 ```
 
 ```{r}
-glimpse(temas)
+votadas %>% 
+  mutate(data = floor_date(data, unit = "halfyear")) %>% 
+  group_by(data) %>%
+  summarise(n = n_distinct(uri_votacao)) %>% 
+  # filter(data != max(data)) %>% 
+  ggplot(aes( x = data, y = n)) + 
+  geom_line() + 
+  geom_point() +
+  labs(title = "Votações por semestre")
+```
+
+
+```{r}
+votadas %>% 
+  mutate(data = floor_date(data, unit = "halfyear")) %>% 
+  distinct(data, proposicao_id) %>%
+  count(data) %>% 
+  ggplot(aes( x = data, y = n)) + 
+  geom_line() + 
+  labs(title = "Proposições afetadas")
+```
+
+Tipos mais comuns
+
+```{r}
+tipos_api = jsonlite::fromJSON(here::here("data/sigla_tipo_na_api.json"))$dados
+
+tipos = tipos_api %>% 
+  select(sigla, nome) %>% 
+  arrange(sigla) %>% 
+  group_by(sigla) %>% 
+  slice(1) 
+
+votadas %>% 
+  distinct(proposicao_id, proposicao_sigla_tipo, proposicao_cod_tipo) %>% 
+  count(proposicao_sigla_tipo, sort = T) %>% 
+  left_join(tipos, by = c("proposicao_sigla_tipo" = "sigla"))
 ```
 
 ```{r}
-temas_principais = temas %>% 
+votadas %>% 
+  distinct(proposicao_id, proposicao_sigla_tipo, proposicao_cod_tipo) %>% 
+  count(proposicao_sigla_tipo, proposicao_cod_tipo, sort = T)
+```
+
+```{r}
+selecionadas = votadas %>% 
+  filter(proposicao_sigla_tipo %in% c('PEC', 'PL', 'PLP',
+                                  'MPV', 'PLV', 'PDL',
+                                  'PRC'))
+```
+
+```{r}
+selecionadas %>% 
+  mutate(data = floor_date(data, unit = "halfyear")) %>% 
+  distinct(data, proposicao_id) %>%
+  count(data) %>% 
+  ggplot(aes( x = data, y = n)) + 
+  geom_line() + 
+  labs(title = "Proposições afetadas, apenas principais tipos")
+```
+
+```{r}
+temas_principais = selecionadas %>% 
+  filter(!is.na(tema)) %>% 
   count(tema) %>% 
-  top_n(10) %>% 
+  top_n(12, n) %>% 
   pull(tema)
 
-temas %>% 
-  filter(tema %in% temas_principais) %>% 
-  count(tema, ano) %>% 
-  complete(tema, ano, fill = list(n = 0)) %>% 
-  ggplot(aes(x = ano, y = n, fill = tema)) + 
-  geom_area(position = "fill", color = "black")
+selecionadas = selecionadas %>% 
+  mutate(tema_resumido = if_else(tema %in% temas_principais, tema, "Outros")) 
 
-temas %>% 
-  filter(tema %in% temas_principais) %>% 
-  filter(ano >= 2018) %>% 
-  count(tema, ano) %>% 
-  group_by(ano) %>% 
+selecionadas %>% 
+  mutate(data = floor_date(data, unit = "year")) %>% 
+  filter(tema_resumido != "Outros") %>% 
+  count(tema_resumido, data) %>% 
+  group_by(data) %>% 
+  complete(tema_resumido, data, fill = list(n = 0)) %>% 
   mutate(n = n / sum(n)) %>% 
-  complete(tema, ano, fill = list(n = 0)) %>% 
-  ggplot(aes(x = ano, y = n, color = tema)) + 
-  geom_line() + 
-  geom_point()
+  ggplot(aes(x = data, y = n, color = tema_resumido)) + 
+  facet_wrap(~ reorder(tema_resumido, -n, min)) +
+  geom_line(size = 1.2, show.legend = F)
+  # geom_area(color = "black", show.legend = F)
 ```
 
 
-
-
-
-
 ```{r}
-siglas_comuns = votacoes %>% 
-  filter(nominal) %>% 
-  count(proposicao_sigla_tipo) %>% 
-  # top_n(6) %>% 
-  pull(proposicao_sigla_tipo)
+library(broom)
+coef_lm = function(x, y) {
+  d2 = tibble(data = x, prop = y) %>% 
+    arrange(data) %>% 
+    mutate(i = rank(data)) %>% 
+    slice((n() - 5):n())
+  m = lm(prop ~ i, data = d2)
+  tidy(m) %>% filter(term == "i") %>% pull(estimate)
+}
 
-votacoes %>% 
-  filter(nominal) %>% 
-  filter(!is.na(data_objeto), proposicao_sigla_tipo %in% siglas_comuns) %>% 
-  group_by(data_objeto) %>% 
-  count(proposicao_sigla_tipo) %>% 
+leg_atual = selecionadas %>% 
+  filter(data >= '2019-01-01')
+
+temas_principais = leg_atual %>% 
+  filter(!is.na(tema)) %>% 
+  count(tema) %>% 
+  top_n(12, n) %>% 
+  pull(tema)
+
+bimestral = leg_atual %>% 
+  mutate(data = floor_date(data, unit = "bimonth")) %>% 
+  count(tema, data) %>% 
+  group_by(data) %>% 
+  mutate(prop = n / sum(n)) %>% 
   ungroup() %>% 
-  complete(data_objeto, proposicao_sigla_tipo, fill = list(n = 0)) %>% 
-  ggplot(aes(x = data_objeto, y = n, color = proposicao_sigla_tipo)) + 
-  geom_line()
+  complete(tema, data, fill = list(n = 0, prop = 0)) 
+
+bimestral = bimestral %>% 
+  group_by(tema) %>% 
+  mutate(coef = coef_lm(data, prop)) 
+
+mais_mudaram = bimestral %>% 
+  distinct(tema, coef) %>% 
+  ungroup() %>% 
+  arrange(coef) %>% 
+  slice(c(1:4, n()-4, n())) 
+
+bimestral %>% 
+  filter(tema %in% mais_mudaram$tema) %>% 
+  ggplot(aes(x = data, y = prop, color = tema)) + 
+  geom_pandemia() +
+  facet_wrap(~ reorder(tema, -coef), ncol = 3) +
+  geom_line(size = 1, show.legend = F) + 
+  geom_point(show.legend = F) + 
+  theme(panel.grid.minor = element_blank()) + 
+  scale_x_date(date_labels = "%b/%y")
 
 ```
 
 ```{r}
-ctema = objetos %>% 
-  left_join(temas, by = c("proposicao_uri" = "uri_proposicao")) 
 
-ctema %>% 
-  mutate(nao_achou = is.na(tema)) %>% 
-  group_by(proposicao_sigla_tipo) %>% 
-  summarise(tem_tema = sum(!is.na(tema)), 
-            prop_tema = tem_tema / n(), 
-            n = n()) %>% 
-  arrange(-prop_tema)
-
-  ggplot(aes(x = reorder(proposicao_sigla_tipo, n), y = n, fill = nao_achou)) +
-  geom_col(position = "fill") + 
-  coord_flip()
 ```
 

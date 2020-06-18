@@ -6,7 +6,7 @@ output:
         theme: sandstone
 ---
 
-```{r warning=FALSE, message=FALSE, echo=FALSE}
+```{r echo=FALSE, message=FALSE, warning=FALSE}
 library(tidyverse)
 library(here)
 library(lubridate)
@@ -32,6 +32,29 @@ votacoes = read_votacoes()
 ```
 
 ```{r}
+data_i = votacoes %>% summarise(i = min(data)) %>% pull(i)
+data_f = votacoes %>% summarise(i = max(data)) %>% pull(i)
+n_v = votacoes %>% summarise(i = n()) %>% pull(i)
+```
+
+```{r}
+pandemia = tibble(inicio = as.Date("2020-02-26"), fim = data_f + days(30))
+
+geom_pandemia = function() {
+  geom_rect(
+    data = pandemia,
+    aes(xmin = inicio, xmax = fim),
+    ymin = -Inf,
+    ymax = Inf,
+    fill = "#ededed",
+    alpha = .7,
+    inherit.aes = F
+  )
+}
+```
+
+
+```{r}
 principais_orgaos = votacoes %>% 
   count(siglaOrgao) %>% 
   top_n(10, n) %>% 
@@ -53,27 +76,6 @@ Os dados:
 votacoes %>% glimpse()
 ```
 
-```{r}
-data_i = votacoes %>% summarise(i = min(data)) %>% pull(i)
-data_f = votacoes %>% summarise(i = max(data)) %>% pull(i)
-n_v = votacoes %>% summarise(i = n()) %>% pull(i)
-```
-
-```{r}
-pandemia = tibble(inicio = as.Date("2020-02-26"), fim = data_f + days(30))
-
-geom_pandemia = function() {
-  geom_rect(
-    data = pandemia,
-    aes(xmin = inicio, xmax = fim),
-    ymin = -Inf,
-    ymax = Inf,
-    fill = "#ededed",
-    alpha = .7,
-    inherit.aes = F
-  )
-}
-```
 
 ### Sobre votações nominais ou não
 
@@ -185,3 +187,20 @@ votacoes %>%
   )
 ```
 
+```{r}
+votacoes %>% 
+  mutate(data = floor_date(data, "months")) %>% 
+  filter(nominal) %>% 
+  count(data, destaque) %>% 
+  ggplot(aes(x = data, y = n, fill = destaque)) + 
+  geom_pandemia() + 
+  geom_col(position = position_fill()) + 
+  scale_y_percent() +
+  scale_fill_manual(values = c("#f9d6ab", "#679186")) +
+  labs(
+    title = "Votações de destaques entre as nominais",
+    subtitle = "Destaque se é votação de DTQ",
+    y = "Proporção das votações",
+    x = "Mês"
+  )
+```

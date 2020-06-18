@@ -19,6 +19,7 @@ Se orientação = Não e o voto é obstrução, isso é concordância?
 library(tidyverse)
 library(here)
 library(lubridate)
+library(zoo)
 
 library(reactable)
 library(hrbrthemes)
@@ -35,22 +36,77 @@ options(digits = 2, scipen = 999)
 # Cores: https://colors.muz.li/palette/f9b4ab/fdebd3/264e70/679186/bbd4ce
 ```
 
-
 ```{r}
 votacoes = read_votacoes()
 
-votos2020 = read_csv(
+votos = read_csv(
   here::here("data/votos.csv.gz"),
   col_types = cols(.default = col_character(), dataHoraVoto = col_datetime(format = ""))
 ) 
 
-orientacoes2020 = read_csv(
+orientacoes = read_csv(
   here::here("data/orientacoes.csv"),
   col_types = cols(.default = col_character(), prioridade_orientacao = col_integer())
 ) 
 
-orientacao_gov = orientacoes2020 %>% 
+orientacao_gov = orientacoes %>% 
   filter(siglaBancada %in% c("Governo"), orientacao != "Liberado")
+```
+
+```{r}
+maiores_partidos = votos %>%
+  group_by(deputado_siglaPartido) %>%
+  summarise(bancada = n_distinct(deputado_id)) %>%
+  top_n(10, wt = bancada) %>%
+  pull(deputado_siglaPartido)
+
+votos = votos %>%
+  mutate(
+    partido_res = if_else(
+      deputado_siglaPartido %in% maiores_partidos,
+      deputado_siglaPartido,
+      "outros"
+    )
+  )
+```
+
+```{r}
+library(RColorBrewer)
+# myColors <- brewer.pal(6,"Set1")
+# names(myColors) <- unique(dados$partido_res)
+my_colors = c("PT" = "#E41A1C",
+              "PR" = "#984EA3", 
+              "PSL" = "#4DAF4A",
+              "PR" = "#FF7F00", 
+              "PP" = "#377EB8",
+              "outros" = "grey")
+color_scale <- scale_colour_manual(name = "partido",values = my_colors)
+fill_scale <- scale_fill_manual(name = "partido",values = my_colors)
+
+date_scale = scale_x_datetime(date_minor_breaks = "1 month", date_labels = "%b/%y")
+
+Sys.setenv(LANGUAGE="pt-br")
+Sys.setlocale("LC_TIME", "pt_BR")
+```
+
+```{r}
+data_i = votacoes %>% summarise(i = min(data)) %>% pull(i)
+data_f = votacoes %>% summarise(i = max(data)) %>% pull(i)
+n_v = votacoes %>% summarise(i = n()) %>% pull(i)
+
+pandemia = tibble(inicio = as.Date("2020-02-26"), fim = data_f + days(30))
+
+geom_pandemia = function() {
+  geom_rect(
+    data = pandemia,
+    aes(xmin = inicio, xmax = fim),
+    ymin = -Inf,
+    ymax = Inf,
+    fill = "#ededed",
+    alpha = .7,
+    inherit.aes = F
+  )
+}
 ```
 
 ## Votações e orientação
@@ -67,18 +123,20 @@ votacoes %>%
 Quem orienta: 
 
 ```{r}
-orientacoes2020 %>% 
+orientacoes %>% 
   count(siglaBancada, sort = T)
 ```
 
 ## Votos e orientação
 
 ```{r}
-votos_orientados = votos2020 %>%
+votos_orientados = votos %>%
   inner_join(orientacao_gov, by = c("idVotacao", "uriVotacao"))
 ```
 
 ```{r}
+JANELA = 30
+
 governismos = votos_orientados %>% 
   group_by(idVotacao) %>% 
   summarise(
@@ -89,18 +147,9 @@ governismos = votos_orientados %>%
             governismo = obedeceram / (obedeceram + desobedeceram), 
             tipo_orientacao = first(siglaBancada)) %>% 
   ungroup() %>% 
-  filter(governismo <= .9 & governismo >= .1)
-
-library(RcppRoll)
-
-JANELA = 20
-
-media_movel = governismos %>% 
+  filter(governismo <= .9 & governismo >= .1) %>% 
   arrange(data) %>% 
-  mutate(media = roll_mean(governismo, JANELA, na.rm = TRUE, align="right", fill = NA)) %>% 
-  # group_by(data_round) %>% 
-  # summarise(media = mean(media, na.rm = T)) %>% 
-  filter(!is.na(media))
+  mutate(media_movel = rollmean(governismo, JANELA, fill = NA, align = "right"))
 ```
 
 
@@ -108,29 +157,91 @@ media_movel = governismos %>%
 
 
 ```{r}
-ggplot() + 
-  geom_rect(data = governismos, 
-            xmin = as.POSIXct(as.Date("2020-02-26")), 
-            xmax = as.POSIXct(max(governismos$data)), 
-            ymin = -Inf, ymax = Inf, 
-            fill = "#ededed") + 
-  geom_point(data = governismos, 
-             aes(x = data, y = governismo),
+ggplot(data = governismos) +
+  geom_rect(
+    xmin = as.POSIXct(as.Date("2020-02-26")),
+    xmax = as.POSIXct(max(governismos$data)),
+    ymin = -Inf,
+    ymax = Inf,
+    fill = "#ededed"
+  ) +
+  geom_point(aes(x = data, y = governismo),
              color = "salmon",
-             alpha = .5) + 
-  # geom_line(data = media_movel, aes(x = data_round, y = media), color = "black") +
-  geom_step(data = media_movel, aes(x = data, y = media), color = "black") +
+             alpha = .5) +
+  geom_step(aes(x = data, y = media_movel), color = "black") +
   scale_y_percent() +
   labs(
-    title = "Aderência à orientação do governo por votação", 
+    title = "Aderência à orientação do governo por votação",
     subtitle = str_glue(
       "Pontos são votações, excluindo consensuais. Linha é a média das últimas {JANELA}."
     ),
-    color = "Orientação", 
-    x = "Data", 
+    color = "Orientação",
+    x = "Data",
     y = "Aderência"
-  ) + 
+  ) +
   NULL
 ```
 
+```{r}
+JANELA = 30
+por_partido = votos_orientados %>% 
+  filter(idVotacao %in% governismos$idVotacao) %>% 
+  group_by(deputado_siglaPartido, idVotacao) %>% 
+  summarise(
+    data = min(dataHoraVoto),
+    obedeceram = sum(voto == orientacao), 
+            votos = n(),
+            desobedeceram = sum(voto != orientacao), 
+            governismo = obedeceram / (obedeceram + desobedeceram), 
+            tipo_orientacao = first(siglaBancada)) %>% 
+  arrange(data) %>% 
+  mutate(media_movel = rollmean(governismo, JANELA, fill = NA, align = "right")) %>% 
+  ungroup() 
+```
+
+```{r}
+por_partido %>%
+  filter(!is.na(governismo)) %>% 
+  # filter(deputado_siglaPartido %in% c("PSOL", "PSL")) %>% 
+  filter(deputado_siglaPartido %in% c("PSOL", maiores_partidos), deputado_siglaPartido != "PR") %>% 
+  ggplot() +
+  geom_rect(
+    xmin = as.POSIXct(as.Date("2020-02-26")),
+    xmax = as.POSIXct(max(governismos$data)),
+    ymin = -Inf,
+    ymax = Inf,
+    fill = "#ededed"
+  ) +
+  geom_point(aes(x = data, y = governismo), color = "gray", alpha = .5, size = .5, show.legend = F) +
+  geom_step(aes(x = data, y = media_movel), show.legend = F) +
+  scale_y_percent() +
+  labs(
+    title = "Aderência à orientação do governo por votação",
+    subtitle = str_glue(
+      "Pontos são votações, excluindo consensuais. Linha é a média das últimas {JANELA}."
+    ),
+    color = "Orientação",
+    x = "Data",
+    y = "Aderência"
+  ) +
+  facet_wrap(~ reorder(deputado_siglaPartido, governismo)) +
+  NULL
+```
+
+```{r}
+oq = por_partido %>% 
+  filter(deputado_siglaPartido == "PSOL") %>% 
+  top_n(20, governismo) %>% 
+  pull(idVotacao)
+
+orientacao_gov %>% 
+  filter(idVotacao %in% oq)
+
+votacoes %>% 
+  filter(id %in% oq) %>% 
+  left_join(orientacao_gov, by = c("id" = "idVotacao")) %>% 
+  select(ultimaApresentacaoProposicao_uriProposicao, orientacao)
+
+
+```
 
