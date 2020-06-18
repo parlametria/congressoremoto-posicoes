@@ -21,3 +21,16 @@ for f in $targets; do
 	echo "Baixando $URL"
 	curl $URL --output $f 
 done
+
+curl -O https://dadosabertos.camara.leg.br/arquivos/votacoesObjetos/csv/votacoesObjetos-2020.csv
+curl -O https://dadosabertos.camara.leg.br/arquivos/votacoesObjetos/csv/votacoesObjetos-2019.csv
+
+targets=`seq 1990 2020`
+for f in $targets; do
+        curl -O https://dadosabertos.camara.leg.br/arquivos/proposicoesTemas/csv/proposicoesTemas-$f.csv
+done
+
+targets=`seq 1990 2020`
+for f in $targets; do
+        curl -O https://dadosabertos.camara.leg.br/arquivos/votacoesProposicoes/csv/votacoesProposicoes-$f.csv
+done

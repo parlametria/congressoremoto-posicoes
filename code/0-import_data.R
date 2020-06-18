@@ -20,6 +20,25 @@ cols_votos = cols(.default = col_character(),
 
 cols_orientacao = cols(.default = col_character())
 
+cols_temas = cols(
+  .default = col_character(),
+  ano = col_double(),
+  relevancia = col_double()
+)
+
+cols_objetos = cols(
+  .default = col_character(),
+  data = col_date(format = ""),
+  proposicao_ano = col_double()
+)
+
+cols_proposicoes = cols(
+  .default = col_character(),
+  data = col_date(format = ""),
+  proposicao_ano = col_double()
+)
+
+
 read_bind_raws = function(f, columns) {
   read_raw = function(f, columns) {
     read_csv2(here::here("data/raw/", f), col_types = columns)
@@ -43,11 +62,19 @@ orientacoes = c("votacoesOrientacoes-2020.csv",
                 "votacoesOrientacoes-2019.csv") %>%
   read_bind_raws(columns = cols_orientacao)
 
+temas = paste0("proposicoesTemas-", 1990:2020, ".csv") %>%
+  read_bind_raws(cols_temas)
+
+objetos = c("votacoesObjetos-2019.csv", "votacoesObjetos-2020.csv") %>%
+  read_bind_raws(cols_objetos)
+
+afetadas = paste0("votacoesProposicoes-", 1990:2020, ".csv") %>%
+  read_bind_raws(cols_proposicoes)
 
 #### LIMPAR E CRUZAR
 
 votacoes = votacoes %>%
-  mutate(nominal = votosSim + votosNao > 10)
+  mutate(nominal = votosSim + votosNao > 100)
 
 orientacoes = orientacoes %>%
   mutate(siglaBancada = if_else(siglaBancada %in% c("GOV.", "Governo"), "Governo", siglaBancada))
@@ -92,3 +119,13 @@ votacoes %>%
 
 orientacoes %>% 
   readr::write_csv(here::here("data", "orientacoes.csv"))
+
+temas %>% 
+  readr::write_csv(here::here("data", "temas.csv"))
+
+objetos %>% 
+  readr::write_csv(here::here("data", "objetos.csv"))
+
+afetadas %>% 
+  readr::write_csv(here::here("data", "proposicoes-afetadas.csv"))
+
