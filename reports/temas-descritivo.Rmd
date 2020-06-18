@@ -1,0 +1,151 @@
+---
+title: "Temas"
+output:
+    html_document: 
+        # self_contained: no
+        theme: sandstone
+---
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+library(tidyverse)
+library(here)
+library(lubridate)
+
+library(reactable)
+library(hrbrthemes)
+theme_set(theme_ipsum_rc())
+
+source(here::here("code/lib.R"))
+
+knitr::opts_chunk$set(tidy = FALSE, 
+                      echo = FALSE,
+                      warning = FALSE)
+set.seed(1014)
+options(digits = 2, scipen = 999)
+
+# Cores: https://colors.muz.li/palette/f9b4ab/fdebd3/264e70/679186/bbd4ce
+```
+
+Por que há objetos null? fazer join no import?
+A maioria não tem temas???
+
+
+
+```{r}
+votacoes_raw = read_votacoes() %>% 
+  janitor::clean_names() %>% 
+  rename(descricao_votacao = descricao)
+
+temas = read_csv(here::here("data/temas.csv"), 
+                 col_types = cols(
+  .default = col_character(),
+  ano = col_double(),
+  relevancia = col_double()
+)) %>% janitor::clean_names()
+
+objetos = read_csv(
+  here::here("data/objetos.csv"),
+  col_types = cols(
+    .default = col_character(),
+    data = col_date(format = ""),
+    proposicao_ano = col_double()
+  )
+) %>% janitor::clean_names() %>%
+  rename(descricao_proposicao = descricao, data_objeto = data)
+
+votacoes = votacoes_raw %>% 
+  left_join(objetos, by = c("id" = "id_votacao", "uri" = "uri_votacao"))
+```
+
+```{r}
+data_i = votacoes %>% summarise(i = min(data)) %>% pull(i)
+data_f = votacoes %>% summarise(i = max(data)) %>% pull(i)
+n_v = votacoes %>% summarise(i = n()) %>% pull(i)
+```
+
+```{r}
+pandemia = tibble(inicio = as.Date("2020-02-26"), fim = data_f + days(30))
+
+geom_pandemia = function() {
+  geom_rect(
+    data = pandemia,
+    aes(xmin = inicio, xmax = fim),
+    ymin = -Inf,
+    ymax = Inf,
+    fill = "#ededed",
+    alpha = .7,
+    inherit.aes = F
+  )
+}
+```
+
+```{r}
+glimpse(temas)
+```
+
+```{r}
+temas_principais = temas %>% 
+  count(tema) %>% 
+  top_n(10) %>% 
+  pull(tema)
+
+temas %>% 
+  filter(tema %in% temas_principais) %>% 
+  count(tema, ano) %>% 
+  complete(tema, ano, fill = list(n = 0)) %>% 
+  ggplot(aes(x = ano, y = n, fill = tema)) + 
+  geom_area(position = "fill", color = "black")
+
+temas %>% 
+  filter(tema %in% temas_principais) %>% 
+  filter(ano >= 2018) %>% 
+  count(tema, ano) %>% 
+  group_by(ano) %>% 
+  mutate(n = n / sum(n)) %>% 
+  complete(tema, ano, fill = list(n = 0)) %>% 
+  ggplot(aes(x = ano, y = n, color = tema)) + 
+  geom_line() + 
+  geom_point()
+```
+
+
+
+
+
+
+```{r}
+siglas_comuns = votacoes %>% 
+  filter(nominal) %>% 
+  count(proposicao_sigla_tipo) %>% 
+  # top_n(6) %>% 
+  pull(proposicao_sigla_tipo)
+
+votacoes %>% 
+  filter(nominal) %>% 
+  filter(!is.na(data_objeto), proposicao_sigla_tipo %in% siglas_comuns) %>% 
+  group_by(data_objeto) %>% 
+  count(proposicao_sigla_tipo) %>% 
+  ungroup() %>% 
+  complete(data_objeto, proposicao_sigla_tipo, fill = list(n = 0)) %>% 
+  ggplot(aes(x = data_objeto, y = n, color = proposicao_sigla_tipo)) + 
+  geom_line()
+
+```
+
+```{r}
+ctema = objetos %>% 
+  left_join(temas, by = c("proposicao_uri" = "uri_proposicao")) 
+
+ctema %>% 
+  mutate(nao_achou = is.na(tema)) %>% 
+  group_by(proposicao_sigla_tipo) %>% 
+  summarise(tem_tema = sum(!is.na(tema)), 
+            prop_tema = tem_tema / n(), 
+            n = n()) %>% 
+  arrange(-prop_tema)
+
+  ggplot(aes(x = reorder(proposicao_sigla_tipo, n), y = n, fill = nao_achou)) +
+  geom_col(position = "fill") + 
+  coord_flip()
+```
+
